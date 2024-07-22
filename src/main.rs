@@ -1,7 +1,12 @@
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    str,
 };
+
+mod http;
+
+use crate::http::*;
 
 const STATUS_200: &[u8] = b"HTTP/1.1 200 OK\r\n\r\n";
 const STATUS_404: &[u8] = b"HTTP/1.1 404 Not Found\r\n\r\n";
@@ -18,7 +23,7 @@ fn main() {
                 handles.push(handle);
             }
             Err(e) => {
-                println!("error: {}", e);
+                eprintln!("error: {}", e);
             }
         }
     }
@@ -38,26 +43,24 @@ fn handle_connection(mut stream: TcpStream) {
         }
 
         // TODO: Better error handling
-        let mut str = std::str::from_utf8(&buf[..]).unwrap().lines();
+        let mut str = str::from_utf8(&buf[..]).unwrap().lines();
         let mut start_line = str.next().unwrap().split_whitespace();
         let method = start_line.next().unwrap();
-        println!("HTTP method: {}", method);
         let target = start_line.next().unwrap();
-        println!("Request target: {}", target);
         match target {
             "/" => match stream.write(STATUS_200) {
                 Ok(_) => {}
-                Err(e) => println!("Error: {}", e),
+                Err(e) => eprintln!("Error: {}", e),
             },
             _ => match stream.write(STATUS_404) {
                 Ok(_) => {}
-                Err(e) => println!("Error: {}", e),
+                Err(e) => eprintln!("Error: {}", e),
             },
         }
     }
 
     match stream.write_all(STATUS_200) {
         Ok(_) => {}
-        Err(e) => println!("Error: {}", e),
+        Err(e) => eprintln!("Error: {}", e),
     }
 }
