@@ -53,29 +53,22 @@ fn handle_connection(mut stream: TcpStream) {
 
         let mut response = HttpResponse::default();
 
-        match request.method {
-            HttpMethod::Get => {
-                if !request.path.has_root() {
-                    response.status(HttpStatusCode::NotFound);
+        if let HttpMethod::Get = request.method {
+            match request.path.to_str() {
+                Some(str) if str.starts_with("/echo") => {
+                    let msg = request.path.file_stem().and_then(|p| p.to_str()).unwrap();
+                    response.body(msg);
+                    response.header(HttpResponseHeader::ContentType(Bytes::from("text/plain")));
+                    response.header(HttpResponseHeader::ContentLength(Bytes::from(
+                        msg.len().to_string(),
+                    )));
                 }
-                if let Some(path) = request.path.parent() {
-                    match path.to_str().unwrap() {
-                        "/echo" => {
-                            let msg = request.path.file_stem().and_then(|p| p.to_str()).unwrap();
-                            response.body(msg);
-                            response
-                                .header(HttpResponseHeader::ContentType(Bytes::from("text/plain")));
-                            response.header(HttpResponseHeader::ContentLength(Bytes::from(
-                                msg.len().to_string(),
-                            )));
-                        }
-                        _ => response.status(HttpStatusCode::NotFound),
-                    }
-                }
+                Some(str) if str.starts_with("/user-agent") => todo!(),
+                Some("/") => {response.status(HttpStatusCode::Ok)}
+                _ => {}
             }
-            _ => response.status(HttpStatusCode::NotFound),
         }
-        println!("Responding with: {:#?}", response.serialize());
+
         match stream.write_all(response.serialize().as_ref()) {
             Ok(_) => continue,
             Err(e) => {

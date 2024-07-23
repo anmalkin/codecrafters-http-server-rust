@@ -128,7 +128,7 @@ impl<'a> HttpResponse<'a> {
 impl<'a> Default for HttpResponse<'a> {
     fn default() -> Self {
         let protocol = HttpProtocol::Http1_1;
-        let status = HttpStatusCode::Ok;
+        let status = HttpStatusCode::NotFound;
         let headers = Vec::new();
         let body = "";
         Self {
