@@ -73,6 +73,7 @@ fn handle_connection(mut stream: TcpStream) {
             }
             _ => response.status(HttpStatusCode::_404_),
         }
+        println!("Responding with: {:#?}", response.as_bytes());
         match stream.write_all(response.as_bytes().as_ref()) {
             Ok(_) => continue,
             Err(e) => {
