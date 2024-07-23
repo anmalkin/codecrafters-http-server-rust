@@ -5,31 +5,36 @@ use std::{path::PathBuf, str::FromStr};
 
 use crate::errors::HttpError;
 
+pub trait Serialize {
+    fn serialize(&self) -> Bytes;
+}
+
 #[derive(Debug)]
 pub enum HttpProtocol {
     Http1_1,
     Http1_0,
 }
 
-impl HttpProtocol {
-    pub fn as_bytes(&self) -> Bytes {
+impl Serialize for HttpProtocol {
+    fn serialize(&self) -> Bytes {
         match self {
-            HttpProtocol::Http1_1 => Bytes::from(&b"HTTP/1.1 "[..]),
-            HttpProtocol::Http1_0 => Bytes::from(&b"HTTP/1.0 "[..]),
+            HttpProtocol::Http1_1 => Bytes::from(&b"HTTP/1.1"[..]),
+            HttpProtocol::Http1_0 => Bytes::from(&b"HTTP/1.0"[..]),
         }
     }
 }
 
+#[derive(Debug)]
 pub enum HttpStatusCode {
-    _200_,
-    _404_,
+    Ok,
+    NotFound,
 }
 
-impl HttpStatusCode {
-    pub fn as_bytes(&self) -> Bytes {
+impl Serialize for HttpStatusCode {
+    fn serialize(&self) -> Bytes {
         match self {
-            HttpStatusCode::_200_ => Bytes::from(&b"200 OK"[..]),
-            HttpStatusCode::_404_ => Bytes::from(&b"404 Not Found"[..]),
+            HttpStatusCode::Ok => Bytes::from(&b"200 OK"[..]),
+            HttpStatusCode::NotFound => Bytes::from(&b"404 Not Found"[..]),
         }
     }
 }
@@ -47,8 +52,8 @@ pub enum HttpResponseHeader {
     ContentLength(Bytes),
 }
 
-impl HttpResponseHeader {
-    pub fn as_bytes(&self) -> Bytes {
+impl Serialize for HttpResponseHeader {
+    fn serialize(&self) -> Bytes {
         match self {
             HttpResponseHeader::ContentType(str) => {
                 let mut header = BytesMut::from(&b"Content-Type: "[..]);
@@ -72,18 +77,8 @@ pub struct HttpResponse<'a> {
 }
 
 impl<'a> HttpResponse<'a> {
-    pub fn new(
-        protocol: HttpProtocol,
-        status: HttpStatusCode,
-        headers: Vec<HttpResponseHeader>,
-        body: &'a str,
-    ) -> Self {
-        Self {
-            protocol,
-            status,
-            headers,
-            body,
-        }
+    pub fn new() -> Self {
+        HttpResponse::default()
     }
 
     pub fn status(&mut self, status: HttpStatusCode) {
@@ -101,26 +96,12 @@ impl<'a> HttpResponse<'a> {
     pub fn body(&mut self, body: &'a str) {
         self.body = body;
     }
-
-    pub fn as_bytes(&self) -> Bytes {
-        let mut response = BytesMut::new();
-        response.put(self.protocol.as_bytes());
-        response.put(self.status.as_bytes());
-        response.put("\r\n".as_bytes());
-        for header in &self.headers {
-            response.put(header.as_bytes());
-            response.put("\r\n".as_bytes());
-        }
-        response.put("\r\n".as_bytes());
-        response.put(self.body.as_bytes());
-        response.freeze()
-    }
 }
 
 impl<'a> Default for HttpResponse<'a> {
     fn default() -> Self {
         let protocol = HttpProtocol::Http1_1;
-        let status = HttpStatusCode::_200_;
+        let status = HttpStatusCode::Ok;
         let headers = Vec::new();
         let body = "";
         Self {
@@ -129,6 +110,23 @@ impl<'a> Default for HttpResponse<'a> {
             headers,
             body,
         }
+    }
+}
+
+impl<'a> Serialize for HttpResponse<'a> {
+    fn serialize(&self) -> Bytes {
+        let mut response = BytesMut::new();
+        response.put(self.protocol.serialize());
+        response.put(&b" "[..]);
+        response.put(self.status.serialize());
+        response.put(&b"\r\n"[..]);
+        for header in &self.headers {
+            response.put(header.serialize());
+            response.put(&b"\r\n"[..]);
+        }
+        response.put(&b"\r\n"[..]);
+        response.put(self.body.as_bytes());
+        response.freeze()
     }
 }
 
