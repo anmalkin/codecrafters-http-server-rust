@@ -5,6 +5,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use crate::errors::HttpError;
 
+/// Serialize data into byte array represented as bytes::Bytes
 pub trait Serialize {
     fn serialize(&self) -> Bytes;
 }
@@ -23,6 +24,19 @@ impl Serialize for HttpProtocol {
         }
     }
 }
+
+impl FromStr for HttpProtocol {
+    type Err = HttpError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "HTTP/1.1" => Ok(HttpProtocol::Http1_1),
+            "HTTP/1.0" => Ok(HttpProtocol::Http1_0),
+            _ => Err(HttpError::ParseProtocolError),
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub enum HttpStatusCode {
@@ -44,6 +58,19 @@ pub enum HttpMethod {
     Get,
     Put,
     Post,
+}
+
+impl FromStr for HttpMethod {
+    type Err = HttpError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "GET" => Ok(HttpMethod::Get),
+            "PUT" => Ok(HttpMethod::Put),
+            "POST" => Ok(HttpMethod::Post),
+            _ => Err(HttpError::ParseMethodError),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -130,6 +157,7 @@ impl<'a> Serialize for HttpResponse<'a> {
     }
 }
 
+/// Structured representation of an HTTP request for more ergonomic handling
 pub struct HttpRequest<'a> {
     pub method: HttpMethod,
     pub path: PathBuf,
@@ -138,6 +166,11 @@ pub struct HttpRequest<'a> {
 }
 
 impl<'a> HttpRequest<'a> {
+    /// Parse byte array into HttpRequest.
+    /// 
+    /// # Errors
+    ///
+    /// Returns `HttpError` if request is not properly formatted.
     pub fn parse(bytes: &'a BytesMut) -> Result<Self, HttpError> {
         let request = std::str::from_utf8(bytes.as_ref())?;
         let mut lines = request.lines();
@@ -171,31 +204,5 @@ impl<'a> HttpRequest<'a> {
             protocol,
             headers,
         })
-    }
-}
-
-// Ergonomic trait implementations
-impl FromStr for HttpProtocol {
-    type Err = HttpError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "HTTP/1.1" => Ok(HttpProtocol::Http1_1),
-            "HTTP/1.0" => Ok(HttpProtocol::Http1_0),
-            _ => Err(HttpError::ParseProtocolError),
-        }
-    }
-}
-
-impl FromStr for HttpMethod {
-    type Err = HttpError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "GET" => Ok(HttpMethod::Get),
-            "PUT" => Ok(HttpMethod::Put),
-            "POST" => Ok(HttpMethod::Post),
-            _ => Err(HttpError::ParseMethodError),
-        }
     }
 }
