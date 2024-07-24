@@ -78,10 +78,14 @@ impl<'a> Response<'a> {
 
     pub fn body(&mut self, body: &'a str) {
         self.body = Some(body);
-        let content_len = body.len();
-        let content_type = "text/plain";
+    }
+
+    pub fn content_type(&mut self, content_type: &'a str) {
         self.headers.push(Header::ContentType(content_type));
-        self.headers.push(Header::ContentLength(content_len));
+    }
+
+    pub fn content_len(&mut self, len: usize) {
+        self.headers.push(Header::ContentLength(len));
     }
 
     pub fn build(&self) -> Bytes {
@@ -110,12 +114,40 @@ impl<'a> Response<'a> {
         }
         Bytes::from(response)
     }
+
+    /// Build simple OK response with no headers or body
+    pub fn ok() -> Bytes {
+        let protocol = Protocol::Http1_1;
+        let status = StatusCode::Ok;
+        let headers = Vec::new();
+        let body = None;
+        Self {
+            protocol,
+            status,
+            headers,
+            body,
+        }.build()
+    }
+
+    /// Build a simple 404 Not Found error response
+    pub fn not_found() -> Bytes {
+        let protocol = Protocol::Http1_1;
+        let status = StatusCode::NotFound;
+        let headers = Vec::new();
+        let body = None;
+        Self {
+            protocol,
+            status,
+            headers,
+            body,
+        }.build()
+    }
 }
 
 impl<'a> Default for Response<'a> {
     fn default() -> Self {
         let protocol = Protocol::Http1_1;
-        let status = StatusCode::NotFound;
+        let status = StatusCode::Ok;
         let headers = Vec::new();
         let body = None;
         Self {

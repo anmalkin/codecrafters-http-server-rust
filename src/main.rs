@@ -11,6 +11,9 @@ use errors::HttpError;
 
 use crate::http::{Method, Request, Response, StatusCode};
 
+const TMP_DIR: &str = "/tmp/data/codecrafters.io/http-server-tester";
+const FILE_DIR: &str = "/files/";
+
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     let mut handles = Vec::new();
@@ -34,38 +37,35 @@ fn main() {
 }
 
 fn handle_connection(mut stream: TcpStream) {
-    let mut buf = BytesMut::from(&[0; 512][..]);
+    let mut buf = BytesMut::from(&[0; 1024][..]);
     loop {
-        let n = stream.read(&mut buf).unwrap();
+        let n = stream.read(&mut buf).unwrap_or(0);
 
         if n == 0 {
             break;
         }
 
         let response = match Request::parse(&buf) {
-            Ok(req) => match req.method {
-                Method::Get => handle_get(req),
+            Ok(request) => match request.method {
+                Method::Get => handle_get(request),
                 Method::Put => todo!(),
                 Method::Post => todo!(),
             },
             Err(e) => {
                 eprintln!("{}", e);
-                continue;
+                Ok(Response::not_found())
             }
         };
 
-        match response {
-            Ok(response) => match stream.write_all(response.as_ref()) {
-                Ok(_) => continue,
-                Err(e) => eprint!("{e}"),
-            },
-            Err(e) => eprint!("{e}"),
+        if let Err(e) = stream.write_all(response.unwrap_or(Response::not_found()).as_ref()) {
+            eprintln!("{e}");
         }
     }
 }
 
 fn handle_get(request: Request) -> Result<Bytes, HttpError> {
     let mut response = Response::default();
+    let file_bytes: Vec<u8>;
     match request.path.to_str() {
         Some(str) if str.starts_with("/echo") => {
             let msg = request
@@ -74,24 +74,37 @@ fn handle_get(request: Request) -> Result<Bytes, HttpError> {
                 .ok_or(HttpError::InvalidRequestFormat)?
                 .to_str()
                 .ok_or(HttpError::InvalidRequestFormat)?;
+            response.status(StatusCode::Ok);
+            response.content_type("text/plain");
+            response.content_len(msg.len());
             response.body(msg);
-            response.status(StatusCode::Ok)
         }
         Some(str) if str.starts_with("/user-agent") => {
             for line in request.headers {
                 if line.to_lowercase().starts_with("user-agent:") {
-                    response.body(
-                        line.split_once(':')
-                            .ok_or(HttpError::InvalidRequestFormat)?
-                            .1
-                            .trim(),
-                    );
-                    response.status(StatusCode::Ok)
+                    let body = line
+                        .split_once(':')
+                        .ok_or(HttpError::InvalidRequestFormat)?
+                        .1
+                        .trim();
+                    response.body(body);
+                    response.status(StatusCode::Ok);
+                    response.content_type("text/plain");
+                    response.content_len(body.len());
                 }
             }
         }
         Some("/") => response.status(StatusCode::Ok),
-        _ => {}
+        Some(str) if str.starts_with(FILE_DIR) => {
+            let uri = format!("{}/{}", TMP_DIR, &str[FILE_DIR.len()..]);
+            file_bytes = std::fs::read(uri)?;
+            let file_str = std::str::from_utf8(file_bytes.as_ref())?;
+            response.status(StatusCode::Ok);
+            response.content_type("application/octet-stream");
+            response.content_len(file_bytes.len());
+            response.body(file_str);
+        }
+        _ => response.status(StatusCode::NotFound),
     }
     Ok(response.build())
 }
