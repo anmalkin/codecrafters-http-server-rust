@@ -1,136 +1,123 @@
 #![allow(dead_code)]
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use std::{path::PathBuf, str::FromStr};
 
 use crate::errors::HttpError;
 
-/// Serialize data into byte array represented as bytes::Bytes
-pub trait Serialize {
-    fn serialize(&self) -> Bytes;
-}
-
 #[derive(Debug)]
-pub enum HttpProtocol {
+pub enum Protocol {
     Http1_1,
     Http1_0,
 }
 
-impl Serialize for HttpProtocol {
-    fn serialize(&self) -> Bytes {
-        match self {
-            HttpProtocol::Http1_1 => Bytes::from(&b"HTTP/1.1"[..]),
-            HttpProtocol::Http1_0 => Bytes::from(&b"HTTP/1.0"[..]),
-        }
-    }
-}
-
-impl FromStr for HttpProtocol {
+impl FromStr for Protocol {
     type Err = HttpError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "HTTP/1.1" => Ok(HttpProtocol::Http1_1),
-            "HTTP/1.0" => Ok(HttpProtocol::Http1_0),
+            "HTTP/1.1" => Ok(Protocol::Http1_1),
+            "HTTP/1.0" => Ok(Protocol::Http1_0),
             _ => Err(HttpError::ParseProtocolError),
         }
     }
 }
 
-
 #[derive(Debug)]
-pub enum HttpStatusCode {
+pub enum StatusCode {
     Ok,
     NotFound,
 }
 
-impl Serialize for HttpStatusCode {
-    fn serialize(&self) -> Bytes {
-        match self {
-            HttpStatusCode::Ok => Bytes::from(&b"200 OK"[..]),
-            HttpStatusCode::NotFound => Bytes::from(&b"404 Not Found"[..]),
-        }
-    }
-}
-
 #[derive(Debug)]
-pub enum HttpMethod {
+pub enum Method {
     Get,
     Put,
     Post,
 }
 
-impl FromStr for HttpMethod {
+impl FromStr for Method {
     type Err = HttpError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_uppercase().as_str() {
-            "GET" => Ok(HttpMethod::Get),
-            "PUT" => Ok(HttpMethod::Put),
-            "POST" => Ok(HttpMethod::Post),
+            "GET" => Ok(Method::Get),
+            "PUT" => Ok(Method::Put),
+            "POST" => Ok(Method::Post),
             _ => Err(HttpError::ParseMethodError),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum HttpResponseHeader {
-    ContentType(Bytes),
-    ContentLength(Bytes),
+pub enum Header<'a> {
+    ContentType(&'a str),
+    ContentLength(usize),
 }
 
-impl Serialize for HttpResponseHeader {
-    fn serialize(&self) -> Bytes {
-        match self {
-            HttpResponseHeader::ContentType(str) => {
-                let mut header = BytesMut::from(&b"Content-Type: "[..]);
-                header.put(&str[..]);
-                header.freeze()
-            }
-            HttpResponseHeader::ContentLength(n) => {
-                let mut header = BytesMut::from(&b"Content-Length: "[..]);
-                header.put(&n[..]);
-                header.freeze()
-            }
-        }
-    }
+#[derive(Debug)]
+pub struct Response<'a> {
+    protocol: Protocol,
+    status: StatusCode,
+    headers: Vec<Header<'a>>,
+    body: Option<&'a str>,
 }
 
-pub struct HttpResponse<'a> {
-    protocol: HttpProtocol,
-    status: HttpStatusCode,
-    headers: Vec<HttpResponseHeader>,
-    body: &'a str,
-}
-
-impl<'a> HttpResponse<'a> {
+impl<'a> Response<'a> {
     pub fn new() -> Self {
-        HttpResponse::default()
+        Response::default()
     }
 
-    pub fn status(&mut self, status: HttpStatusCode) {
+    pub fn status(&mut self, status: StatusCode) {
         self.status = status;
     }
 
-    pub fn header(&mut self, header: HttpResponseHeader) {
+    pub fn header(&mut self, header: Header<'a>) {
         self.headers.push(header);
     }
 
-    pub fn headers(&mut self, headers: &mut Vec<HttpResponseHeader>) {
-        self.headers.append(headers);
+    pub fn body(&mut self, body: &'a str) {
+        self.body = Some(body);
+        let content_len = body.len();
+        let content_type = "text/plain";
+        self.headers.push(Header::ContentType(content_type));
+        self.headers.push(Header::ContentLength(content_len));
     }
 
-    pub fn body(&mut self, body: &'a str) {
-        self.body = body;
+    pub fn build(&self) -> Bytes {
+        let protocol = match self.protocol {
+            Protocol::Http1_1 => "HTTP/1.1",
+            Protocol::Http1_0 => "HTTP/1.0",
+        };
+
+        let status = match self.status {
+            StatusCode::Ok => "200 OK",
+            StatusCode::NotFound => "404 Not Found",
+        };
+
+        let mut response = format!("{} {}\r\n", protocol, status);
+        for header in &self.headers {
+            let header = match header {
+                Header::ContentType(content) => format!("Content-Type: {}", content),
+                Header::ContentLength(n) => format!("Content-Length: {}", n),
+            };
+            response.push_str(header.as_str());
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        if let Some(body) = self.body {
+            response.push_str(body);
+        }
+        Bytes::from(response)
     }
 }
 
-impl<'a> Default for HttpResponse<'a> {
+impl<'a> Default for Response<'a> {
     fn default() -> Self {
-        let protocol = HttpProtocol::Http1_1;
-        let status = HttpStatusCode::NotFound;
+        let protocol = Protocol::Http1_1;
+        let status = StatusCode::NotFound;
         let headers = Vec::new();
-        let body = "";
+        let body = None;
         Self {
             protocol,
             status,
@@ -140,39 +127,22 @@ impl<'a> Default for HttpResponse<'a> {
     }
 }
 
-impl<'a> Serialize for HttpResponse<'a> {
-    fn serialize(&self) -> Bytes {
-        let mut response = BytesMut::new();
-        response.put(self.protocol.serialize());
-        response.put(&b" "[..]);
-        response.put(self.status.serialize());
-        response.put(&b"\r\n"[..]);
-        for header in &self.headers {
-            response.put(header.serialize());
-            response.put(&b"\r\n"[..]);
-        }
-        response.put(&b"\r\n"[..]);
-        response.put(self.body.as_bytes());
-        response.freeze()
-    }
-}
-
 /// Structured representation of an HTTP request for more ergonomic handling
-pub struct HttpRequest<'a> {
-    pub method: HttpMethod,
+pub struct Request<'a> {
+    pub method: Method,
     pub path: PathBuf,
-    pub protocol: HttpProtocol,
+    pub protocol: Protocol,
     pub headers: Vec<&'a str>,
 }
 
-impl<'a> HttpRequest<'a> {
-    /// Parse byte array into HttpRequest.
-    /// 
+impl<'a> Request<'a> {
+    /// Parse byte array into Request.
+    ///
     /// # Errors
     ///
     /// Returns `HttpError` if request is not properly formatted.
-    pub fn parse(bytes: &'a BytesMut) -> Result<Self, HttpError> {
-        let request = std::str::from_utf8(bytes.as_ref())?;
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, HttpError> {
+        let request = std::str::from_utf8(bytes)?;
         let mut lines = request.lines();
         let mut start_line = lines
             .next()
@@ -182,7 +152,7 @@ impl<'a> HttpRequest<'a> {
         let method = start_line
             .next()
             .ok_or(HttpError::InvalidRequestFormat)?
-            .parse::<HttpMethod>()?;
+            .parse::<Method>()?;
 
         let path = std::path::Path::new(start_line.next().ok_or(HttpError::InvalidRequestFormat)?)
             .to_owned();
@@ -190,7 +160,7 @@ impl<'a> HttpRequest<'a> {
         let protocol = start_line
             .next()
             .ok_or(HttpError::InvalidRequestFormat)?
-            .parse::<HttpProtocol>()?;
+            .parse::<Protocol>()?;
 
         let mut headers = Vec::new();
         let mut curr_line = lines.next().ok_or(HttpError::InvalidRequestFormat)?;

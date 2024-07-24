@@ -7,10 +7,9 @@ mod errors;
 mod http;
 
 use bytes::{Bytes, BytesMut};
+use errors::HttpError;
 
-use crate::http::{
-    HttpMethod, HttpRequest, HttpResponse, HttpResponseHeader, HttpStatusCode, Serialize,
-};
+use crate::http::{Method, Request, Response, StatusCode};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -43,38 +42,56 @@ fn handle_connection(mut stream: TcpStream) {
             break;
         }
 
-        let request = match HttpRequest::parse(&buf) {
-            Ok(request) => request,
+        let response = match Request::parse(&buf) {
+            Ok(req) => match req.method {
+                Method::Get => handle_get(req),
+                Method::Put => todo!(),
+                Method::Post => todo!(),
+            },
             Err(e) => {
                 eprintln!("{}", e);
                 continue;
             }
         };
 
-        let mut response = HttpResponse::default();
-
-        if let HttpMethod::Get = request.method {
-            match request.path.to_str() {
-                Some(str) if str.starts_with("/echo") => {
-                    let msg = request.path.file_stem().and_then(|p| p.to_str()).unwrap();
-                    response.body(msg);
-                    response.header(HttpResponseHeader::ContentType(Bytes::from("text/plain")));
-                    response.header(HttpResponseHeader::ContentLength(Bytes::from(
-                        msg.len().to_string(),
-                    )));
-                }
-                Some(str) if str.starts_with("/user-agent") => todo!(),
-                Some("/") => {response.status(HttpStatusCode::Ok)}
-                _ => {}
-            }
-        }
-
-        match stream.write_all(response.serialize().as_ref()) {
-            Ok(_) => continue,
-            Err(e) => {
-                eprintln!("{}", e);
-                break;
-            }
+        match response {
+            Ok(response) => match stream.write_all(response.as_ref()) {
+                Ok(_) => continue,
+                Err(e) => eprint!("{e}"),
+            },
+            Err(e) => eprint!("{e}"),
         }
     }
+}
+
+fn handle_get(request: Request) -> Result<Bytes, HttpError> {
+    let mut response = Response::default();
+    match request.path.to_str() {
+        Some(str) if str.starts_with("/echo") => {
+            let msg = request
+                .path
+                .file_name()
+                .ok_or(HttpError::InvalidRequestFormat)?
+                .to_str()
+                .ok_or(HttpError::InvalidRequestFormat)?;
+            response.body(msg);
+            response.status(StatusCode::Ok)
+        }
+        Some(str) if str.starts_with("/user-agent") => {
+            for line in request.headers {
+                if line.to_lowercase().starts_with("user-agent:") {
+                    response.body(
+                        line.split_once(':')
+                            .ok_or(HttpError::InvalidRequestFormat)?
+                            .1
+                            .trim(),
+                    );
+                    response.status(StatusCode::Ok)
+                }
+            }
+        }
+        Some("/") => response.status(StatusCode::Ok),
+        _ => {}
+    }
+    Ok(response.build())
 }
