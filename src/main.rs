@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream}, os::unix::ffi::OsStrExt,
 };
 
 mod errors;
@@ -45,11 +45,11 @@ fn handle_connection(mut stream: TcpStream) {
             break;
         }
 
-        let response = match Request::parse(&buf) {
+        let response = match Request::parse(&buf[..n]) {
             Ok(request) => match request.method {
-                Method::Get => handle_get(request),
+                Method::Get => get(request),
+                Method::Post => post(request),
                 Method::Put => todo!(),
-                Method::Post => todo!(),
             },
             Err(e) => {
                 eprintln!("{}", e);
@@ -63,21 +63,19 @@ fn handle_connection(mut stream: TcpStream) {
     }
 }
 
-fn handle_get(request: Request) -> Result<Bytes, HttpError> {
+fn get(request: Request) -> Result<Bytes, HttpError> {
     let mut response = Response::default();
-    let file_bytes: Vec<u8>;
+    let file_contents: Vec<u8>;
     match request.path.to_str() {
         Some(str) if str.starts_with("/echo") => {
             let msg = request
                 .path
                 .file_name()
-                .ok_or(HttpError::InvalidRequestFormat)?
-                .to_str()
                 .ok_or(HttpError::InvalidRequestFormat)?;
             response.status(StatusCode::Ok);
             response.content_type("text/plain");
             response.content_len(msg.len());
-            response.body(msg);
+            response.body(msg.as_bytes());
         }
         Some(str) if str.starts_with("/user-agent") => {
             for line in request.headers {
@@ -87,7 +85,7 @@ fn handle_get(request: Request) -> Result<Bytes, HttpError> {
                         .ok_or(HttpError::InvalidRequestFormat)?
                         .1
                         .trim();
-                    response.body(body);
+                    response.body(body.as_bytes());
                     response.status(StatusCode::Ok);
                     response.content_type("text/plain");
                     response.content_len(body.len());
@@ -97,13 +95,29 @@ fn handle_get(request: Request) -> Result<Bytes, HttpError> {
         Some("/") => response.status(StatusCode::Ok),
         Some(str) if str.starts_with(FILE_DIR) => {
             let uri = format!("{}/{}", TMP_DIR, &str[FILE_DIR.len()..]);
-            file_bytes = std::fs::read(uri)?;
-            let file_str = std::str::from_utf8(file_bytes.as_ref())?;
+            file_contents = std::fs::read(uri)?;
             response.status(StatusCode::Ok);
             response.content_type("application/octet-stream");
-            response.content_len(file_bytes.len());
-            response.body(file_str);
+            response.content_len(file_contents.len());
+            response.body(file_contents.as_ref());
         }
+        _ => response.status(StatusCode::NotFound),
+    }
+    Ok(response.build())
+}
+
+fn post(request: Request) -> Result<Bytes, HttpError> {
+    let mut response = Response::default();
+    match request.path.to_str() {
+        Some(str) if str.starts_with(FILE_DIR) => {
+            let uri = format!("{}/{}", TMP_DIR, &str[FILE_DIR.len()..]);
+            let mut file = std::fs::File::create(uri)?;
+            if let Some(body) = request.body {
+                println!("Body is length {}", body.len());
+                file.write_all(body.as_ref())?;
+            }
+            response.status(StatusCode::Created);
+        },
         _ => response.status(StatusCode::NotFound),
     }
     Ok(response.build())

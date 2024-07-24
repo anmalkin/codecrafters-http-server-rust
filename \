@@ -27,7 +27,6 @@ impl FromStr for Protocol {
 pub enum StatusCode {
     Ok,
     NotFound,
-    Created,
 }
 
 #[derive(Debug)]
@@ -98,7 +97,6 @@ impl<'a> Response<'a> {
         let status = match self.status {
             StatusCode::Ok => "200 OK",
             StatusCode::NotFound => "404 Not Found",
-            StatusCode::Created => "201 Created",
         };
 
         let mut metadata = format!("{} {}\r\n", protocol, status);
@@ -168,7 +166,7 @@ pub struct Request<'a> {
     pub path: PathBuf,
     pub protocol: Protocol,
     pub headers: Vec<&'a str>,
-    pub body: Option<Bytes>
+    pub body: Option<&'a [u8]>
 }
 
 impl<'a> Request<'a> {
@@ -204,13 +202,12 @@ impl<'a> Request<'a> {
             headers.push(curr_line);
             curr_line = lines.next().ok_or(HttpError::InvalidRequestFormat)?;
         }
-        let body = Some(Bytes::from(lines.collect::<String>()));
+        let body: &[u8] = lines.collect();
         Ok(Self {
             method,
             path,
             protocol,
             headers,
-            body,
         })
     }
 }
